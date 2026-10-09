@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f7f5f1" />
+<title>循环计时 · 学习 休整 游戏 眺望</title>
+<style>
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    display: grid;
+    place-items: center;
+    padding: 26px 20px calc(26px + env(safe-area-inset-bottom));
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    color: #3E4653;
+    background: radial-gradient(120% 95% at 50% -12%, #ffffff 0%, #f9f7f4 42%, #f0ede8 100%);
+    -webkit-font-smoothing: antialiased;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  /* ================= 表盘 ================= */
+  .dial {
+    position: relative;
+    width: min(86vw, 400px);
+    aspect-ratio: 1 / 1;
+  }
+
+  .dial svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  /* 弧线 */
+  .arc-base,
+  .arc-prog {
+    fill: none;
+    stroke-width: 14;
+    stroke-linecap: round;
+  }
+
+  .arc-prog {
+    transition: stroke-dashoffset .25s linear, opacity .45s ease;
+  }
+
+  /* 阶段文字 */
+  .lbl-name {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    fill: #A9B1BC;
+    text-anchor: middle;
+    transition: fill .45s ease;
+  }
+
+  .lbl-sub {
+    font-family: inherit;
+    font-size: 11px;
+    fill: #C3C9D2;
+    text-anchor: middle;
+    transition: fill .45s ease;
+  }
+
+  .lbl-group {
+    transition: opacity .45s ease;
+  }
+
+  .lbl-group.active .lbl-name { fill: #3E4653; }
+  .lbl-group.active .lbl-sub  { fill: #8B94A2; }
+
+  /* 光点 */
+  #halo { opacity: .16; transition: fill .45s ease; }
+  #dot  { stroke: #ffffff; stroke-width: 2.5; transition: fill .45s ease; }
+
+  /* 中心文字 */
+  .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    pointer-events: none;
+  }
+
+  .c-stage {
+    font-size: min(3.6vw, 15px);
+    font-weight: 600;
+    letter-spacing: 4px;
+    text-indent: 4px;
+    transition: color .45s ease;
+  }
+
+  .c-time {
+    font-size: min(11.8vw, 55px);
+    font-weight: 200;
+    line-height: 1.02;
+    letter-spacing: .5px;
+    color: #2F3640;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  .c-round {
+    font-size: min(2.9vw, 12px);
+    letter-spacing: 1px;
+    color: #AEB5BF;
+  }
+
+  /* ================= 按钮 ================= */
+  .controls {
+    display: flex;
+    gap: 10px;
+  }
+
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 11px 26px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, .06);
+    background: rgba(255, 255, 255, .85);
+    color: #5C6472;
+    cursor: pointer;
+    transition: transform .12s ease, background .25s ease,
+                box-shadow .25s ease, color .25s ease;
+  }
+
+  button:hover  { background: #ffffff; box-shadow: 0 4px 14px -6px rgba(0,0,0,.14); }
+  button:active { transform: scale(.96); }
+
+  #startBtn {
+    padding: 11px 40px;
+    border-color: transparent;
+    background: var(--accent, #7BA2CC);
+    color: #ffffff;
+    font-weight: 600;
+    letter-spacing: 1px;
+    box-shadow: 0 10px 24px -12px var(--accent, #7BA2CC);
+    transition: background .45s ease, box-shadow .45s ease, transform .12s ease;
+  }
+
+  #startBtn:hover { filter: brightness(1.04); }
+
+  .hint {
+    font-size: 11px;
+    letter-spacing: .5px;
+    color: #B9C0C9;
+  }
+
+  @media (max-width: 360px) {
+    button      { padding: 10px 18px; font-size: 13px; }
+    #startBtn   { padding: 10px 28px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="dial">
+    <svg viewBox="0 0 400 400" aria-hidden="true">
+      <g id="arcLayer"></g>
+      <g id="labelLayer"></g>
+      <g id="cursorLayer" transform="translate(200 80)">
+        <circle id="halo" cx="0" cy="0" r="15"></circle>
+        <circle id="dot"  cx="0" cy="0" r="7"></circle>
+      </g>
+    </svg>
+
+    <div class="center">
+      <div class="c-stage" id="cStage">学习</div>
+      <div class="c-time"  id="cTime">60:00</div>
+      <div class="c-round" id="cRound">第 1 轮</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn" type="button">开始</button>
+    <button id="resetBtn" type="button">重置</button>
+  </div>
+
+  <div class="hint">空格 开始 / 暂停 · R 重置 · 点击圆环跳转</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ============================================================
+     阶段定义：学习 60min → 休整 3min → 游戏 25min → 眺望 3min
+     （一轮合计 91 分钟）
+     ============================================================ */
+  const STAGES = [
+    { name: "学习", sub: "60 分", secs: 3600, color: "#7BA2CC", soft: "#E7EEF7" },
+    { name: "休整", sub: "3 分",  secs: 180,  color: "#7FBFA4", soft: "#E4F1EB" },
+    { name: "游戏", sub: "25 分", secs: 1500, color: "#DDAE83", soft: "#F8ECE1" },
+    { name: "眺望", sub: "3 分",  secs: 180,  color: "#A79BCB", soft: "#EDEAF7" }
+  ];
+
+  /* ---------------- 几何参数 ---------------- */
+  const CX = 200, CY = 200, R = 120;
+  const GAP  = 12;                // 每段弧之间的空隙（度）
+  const SPAN = 90 - GAP;          // 每段弧跨度 = 78°
+  const ARC_LEN = R * SPAN * Math.PI / 180;
+
+  const SVGNS = "http://www.w3.org/2000/svg";
+
+  /* ---------------- DOM ---------------- */
+  const arcLayer    = document.getElementById("arcLayer");
+  const labelLayer  = document.getElementById("labelLayer");
+  const cursorLayer = document.getElementById("cursorLayer");
+  const halo        = document.getElementById("halo");
+  const dot         = document.getElementById("dot");
+
+  const cStage   = document.getElementById("cStage");
+  const cTime    = document.getElementById("cTime");
+  const cRound   = document.getElementById("cRound");
+  const startBtn = document.getElementById("startBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const progEls  = [];   // 各段进度弧
+  const labelEls = [];   // 各段文字组
+
+  /* ---------------- 工具 ---------------- */
+  function pt(deg, r) {
+    const rad = deg * Math.PI / 180;
+    return { x: CX + r * Math.sin(rad), y: CY - r * Math.cos(rad) };
+  }
+
+  function arcPath(a1, a2, r) {
+    const p1 = pt(a1, r), p2 = pt(a2, r);
+    const large = (a2 - a1) > 180 ? 1 : 0;
+    return "M " + p1.x.toFixed(2) + " " + p1.y.toFixed(2) +
+           " A " + r + " " + r + " 0 " + large + " 1 " +
+           p2.x.toFixed(2) + " " + p2.y.toFixed(2);
+  }
+
+  function fmt(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0");
+  }
+
+  /* ============================================================
+     构建圆环
+     ============================================================ */
+  STAGES.forEach(function (st, i) {
+    const a1 = i * 90 + GAP / 2;
+    const a2 = a1 + SPAN;
+    const d  = arcPath(a1, a2, R);
+
+    /* 底弧 */
+    const base = document.createElementNS(SVGNS, "path");
+    base.setAttribute("d", d);
+    base.setAttribute("class", "arc-base");
+    base.setAttribute("stroke", st.soft);
+    arcLayer.appendChild(base);
+
+    /* 进度弧 */
+    const prog = document.createElementNS(SVGNS, "path");
+    prog.setAttribute("d", d);
+    prog.setAttribute("class", "arc-prog");
+    prog.setAttribute("stroke", st.color);
+    prog.setAttribute("stroke-dasharray", ARC_LEN.toFixed(2));
+    prog.setAttribute("stroke-dashoffset", ARC_LEN.toFixed(2));
+    prog.style.opacity = "0";
+    arcLayer.appendChild(prog);
+    progEls.push(prog);
+
+    /* 点击热区 */
+    const hit = document.createElementNS(SVGNS, "path");
+    hit.setAttribute("d", d);
+    hit.setAttribute("fill", "none");
+    hit.setAttribute("stroke", "transparent");
+    hit.setAttribute("stroke-width", "44");
+    hit.style.pointerEvents = "stroke";
+    hit.style.cursor = "pointer";
+    hit.addEventListener("click", function () { jumpTo(i); });
+    arcLayer.appendChild(hit);
+
+    /* 外侧文字 */
+    const mid = i * 90 + 45;
+    const lp  = pt(mid, 150);
+
+    const g = document.createElementNS(SVGNS, "g");
+    g.setAttribute("class", "lbl-group");
+
+    const t1 = document.createElementNS(SVGNS, "text");
+    t1.setAttribute("class", "lbl-name");
+    t1.setAttribute("x", lp.x.toFixed(1));
+    t1.setAttribute("y", (lp.y - 5).toFixed(1));
+    t1.textContent = st.name;
+
+    const t2 = document.createElementNS(SVGNS, "text");
+    t2.setAttribute("class", "lbl-sub");
+    t2.setAttribute("x", lp.x.toFixed(1));
+    t2.setAttribute("y", (lp.y + 14).toFixed(1));
+    t2.textContent = st.sub;
+
+    g.appendChild(t1);
+    g.appendChild(t2);
+    labelLayer.appendChild(g);
+    labelEls.push(g);
+  });
+
+  /* ============================================================
+     状态
+     ============================================================ */
+  let idx       = 0;
+  let remaining = STAGES[0].secs;
+  let running   = false;
+  let round     = 1;
+  let endAt     = 0;
+  let rafId     = null;
+  let lastTxt   = "";
+  let lastStage = "";
+
+  /* ============================================================
+     音效
+     ============================================================ */
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (audioCtx) {
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+  }
+
+  function chime() {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime + 0.02;
+    [1046.5, 1318.5, 1568.0].forEach(function (f, i) {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      const t = t0 + i * 0.11;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.1, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + 0.5);
+    });
+  }
+
+  /* ============================================================
+     渲染
+     ============================================================ */
+  function applyStage() {
+    const st = STAGES[idx];
+
+    document.documentElement.style.setProperty("--accent", st.color);
+
+    cStage.textContent = st.name;
+    cStage.style.color = st.color;
+    cRound.textContent = "第 " + round + " 轮";
+
+    dot.setAttribute("fill", st.color);
+    halo.setAttribute("fill", st.color);
+
+    labelEls.forEach(function (g, i) {
+      g.classList.toggle("active", i === idx);
+    });
+  }
+
+  function paint() {
+    const st = STAGES[idx];
+    const p  = Math.min(1, Math.max(0, 1 - remaining / st.secs));
+
+    /* 进度弧 */
+    for (let i = 0; i < progEls.length; i++) {
+      const el = progEls[i];
+      if (i < idx) {
+        el.setAttribute("stroke-dashoffset", "0");
+        el.style.opacity = "0.32";
+      } else if (i === idx) {
+        el.setAttribute("stroke-dashoffset", (ARC_LEN * (1 - p)).toFixed(2));
+        el.style.opacity = "1";
+      } else {
+        el.setAttribute("stroke-dashoffset", ARC_LEN.toFixed(2));
+        el.style.opacity = "0";
+      }
+    }
+
+    /* 光点 */
+    const a1  = idx * 90 + GAP / 2;
+    const ang = a1 + p * SPAN;
+    const pos = pt(ang, R);
+    cursorLayer.setAttribute(
+      "transform",
+      "translate(" + pos.x.toFixed(2) + " " + pos.y.toFixed(2) + ")"
+    );
+
+    /* 时间文本 */
+    const txt = fmt(remaining);
+    if (txt !== lastTxt) {
+      cTime.textContent = txt;
+      lastTxt = txt;
+      document.title = txt + " · " + st.name;
+    }
+    if (lastStage !== st.name) {
+      lastStage = st.name;
+      document.title = txt + " · " + st.name;
+    }
+  }
+
+  /* ============================================================
+     流程控制
+     ============================================================ */
+  function advance() {
+    idx = (idx + 1) % STAGES.length;
+    if (idx === 0) round++;
+    remaining = STAGES[idx].secs;
+    applyStage();
+    chime();
+  }
+
+  function tick() {
+    if (!running) return;
+
+    remaining = (endAt - Date.now()) / 1000;
+
+    if (remaining <= 0) {
+      const over = -remaining;
+      advance();
+      remaining = Math.max(0, STAGES[idx].secs - over);
+      endAt = Date.now() + remaining * 1000;
+    }
+
+    paint();
+  }
+
+  function frame() {
+    if (!running) return;
+    tick();
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (running) return;
+    ensureAudio();
+    running = true;
+    endAt = Date.now() + remaining * 1000;
+    startBtn.textContent = "暂停";
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function pause() {
+    if (!running) return;
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    startBtn.textContent = "继续";
+  }
+
+  function toggle() { running ? pause() : start(); }
+
+  function reset() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    idx = 0;
+    round = 1;
+    remaining = STAGES[0].secs;
+    startBtn.textContent = "开始";
+    lastTxt = "";
+    lastStage = "";
+    applyStage();
+    paint();
+  }
+
+  function jumpTo(i) {
+    if (i === idx) return;
+    idx = i;
+    remaining = STAGES[i].secs;
+    if (running) endAt = Date.now() + remaining * 1000;
+    lastTxt = "";
+    lastStage = "";
+    applyStage();
+    paint();
+  }
+
+  /* ============================================================
+     事件
+     ============================================================ */
+  startBtn.addEventListener("click", toggle);
+  resetBtn.addEventListener("click", reset);
+
+  window.addEventListener("keydown", function (e) {
+    if (e.code === "Space") {
+      e.preventDefault();
+      toggle();
+    } else if (e.key === "r" || e.key === "R") {
+      reset();
+    }
+  });
+
+  /* 回到前台立刻校准 */
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && running) tick();
+  });
+
+  /* 初始化 */
+  applyStage();
+  paint();
+})();
+</script>
+</body>
+</html>
